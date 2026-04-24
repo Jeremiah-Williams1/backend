@@ -7,8 +7,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 	"unicode"
@@ -411,39 +413,39 @@ func GetPosts(w http.ResponseWriter, r *http.Request) {
 // Request Clinet and function
 var client = &http.Client{Timeout: 15 * time.Second}
 
-// func GetMetadata(url string) (models.MetadataResponse, error) {
-// 	// make the request
-// 	link := fmt.Sprintf("https://jsonlink.io/api/extract?url=%s&api_key=%s", url, os.Getenv("JSONLINK_API_KEY"))
-// 	fmt.Println("Fetching:", link)
-// 	resp, err := client.Get(link)
-// 	if err != nil {
-// 		return models.MetadataResponse{}, err
-// 	}
-// 	defer resp.Body.Close()
-
-// 	// Additional check
-// 	if resp.StatusCode != http.StatusOK {
-// 		return models.MetadataResponse{}, fmt.Errorf("metadata API returned status %d", resp.StatusCode)
-// 	}
-
-// 	var result models.MetadataResponse
-// 	err = json.NewDecoder(resp.Body).Decode(&result)
-// 	if err != nil {
-// 		return models.MetadataResponse{}, err
-// 	}
-
-// 	return result, nil
-// }
-
 func GetMetadata(url string) (models.MetadataResponse, error) {
-	// temporary mock for local testing
-	return models.MetadataResponse{
-		Title:       "Test Article",
-		Description: "Test description",
-		SiteName:    "BBC",
-		Domain:      "bbc.com",
-	}, nil
+	// make the request
+	link := fmt.Sprintf("https://jsonlink.io/api/extract?url=%s&api_key=%s", url, os.Getenv("JSONLINK_API_KEY"))
+	fmt.Println("Fetching:", link)
+	resp, err := client.Get(link)
+	if err != nil {
+		return models.MetadataResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	// Additional check
+	if resp.StatusCode != http.StatusOK {
+		return models.MetadataResponse{}, fmt.Errorf("metadata API returned status %d", resp.StatusCode)
+	}
+
+	var result models.MetadataResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return models.MetadataResponse{}, err
+	}
+
+	return result, nil
 }
+
+// func GetMetadata(url string) (models.MetadataResponse, error) {
+// 	// temporary mock for local testing
+// 	return models.MetadataResponse{
+// 		Title:       "Test Article",
+// 		Description: "Test description",
+// 		SiteName:    "BBC",
+// 		Domain:      "bbc.com",
+// 	}, nil
+// }
 
 func usernameOk(s string) bool {
 	runes := []rune(s)
