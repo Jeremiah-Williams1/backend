@@ -4,7 +4,9 @@ import (
 	"boards/db"
 	"boards/middleware"
 	"boards/models"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,11 +20,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/gomail.v2"
 )
 
 func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var u models.UserInput
-
+	// Decode the Inputs
 	err := json.NewDecoder(r.Body).Decode(&u)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -34,6 +37,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 
 	}
 
+	// validate the password, email username is ok
 	ok := passwordOk(u.Password)
 	if !ok {
 		w.WriteHeader(http.StatusBadRequest)
@@ -52,7 +56,17 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	ok = emailOk(u.Email)
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":  "error",
+			"message": "invalid email",
+		})
+		return
+	}
 
+	// Hash the password
 	hash, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -64,19 +78,22 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 
 	}
 
+	// Input the user into the struct
 	response := models.User{
 		ID:        uuid.Must(uuid.NewV7()).String(),
 		Username:  u.Username,
 		Password:  string(hash),
+		Email:     u.Email,
+		Verified:  false,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// send to the database
 	_, err = db.DB.Exec(`
         INSERT INTO users 
-        (id, username, password, created_at)
-        VALUES ($1,$2,$3,$4)`,
-		response.ID, response.Username, response.Password, response.CreatedAt,
+        (id, username, password, email, verified, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6)`,
+		response.ID, response.Username, response.Password, response.Email, response.Verified, response.CreatedAt,
 	)
 
 	if err != nil {
@@ -101,6 +118,59 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// DELETE ANY EXISTING TOKEN FOR THE USER
+	_, err = db.DB.Exec("DELETE FROM tokens WHERE user_id = $1", response.ID)
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// GENERATE TOKEN AND SET EXPIRY TO 24 HOURS FROM THE NOW
+	tk := generateEmailToken()
+
+	token := models.Token{
+		TokenString: tk,
+		ExpiresAt:   time.Now().Add(24 * time.Hour),
+	}
+	// INSERT TOKEN INTO STRUCT AND THEN DB TABLE
+	_, err = db.DB.Exec(`
+        INSERT INTO tokens 
+        (user_id, token, expires_at)
+        VALUES ($1,$2,$3)`,
+		response.ID, token.TokenString, token.ExpiresAt,
+	)
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// SEND VERIFICATION LINK
+	email := u.Email
+	subject := "Verify Your Account"
+	link := os.Getenv("BASE_URL") + "/api/verify?token=" + tk
+	body := "Click this link to verify your email: " + link
+
+	err = sendEmail(email, subject, body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// RESPONSE
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":  "success",
@@ -490,3 +560,43 @@ func urlOk(s string) bool {
 
 	return false
 }
+
+func emailOk(s string) bool {
+	parts := strings.Split(s, "@")
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	if !strings.Contains(parts[1], ".") {
+		return false
+	}
+
+	return true
+}
+
+func sendEmail(to, subject, msg string) error {
+	m := gomail.NewMessage()
+	m.SetHeader("From", os.Getenv("SENDER_ADDRESS"))
+	m.SetHeader("To", to)
+	m.SetHeader("Subject", subject)
+	m.SetBody("text/plain", msg)
+
+	d := gomail.NewDialer("smtp.gmail.com", 587, os.Getenv("SENDER_ADDRESS"), os.Getenv("APP_PASSWORD"))
+	return d.DialAndSend(m)
+}
+
+func generateEmailToken() string {
+	bytes := make([]byte, 32)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+
+}
+
+const tableSchema = `
+    CREATE TABLE IF NOT EXISTS tokens (
+        user_id UUID REFERENCES users(id),
+        token VARCHAR NOT NULL UNIQUE,
+		expires_at TIMESTAMPTZ NOT NULL
+    );`

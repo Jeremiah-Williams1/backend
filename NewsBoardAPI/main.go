@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"boards/db"
 	"boards/handlers"
@@ -23,7 +24,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/register", middleware.CorsMiddleware(handlers.RegisterUser))
-	mux.HandleFunc("POST /api/login", middleware.CorsMiddleware(handlers.UserLogin))
+	mux.HandleFunc("POST /api/login", middleware.CorsMiddleware(middleware.RateLimiterMiddleWare(5, 60*time.Second)(handlers.UserLogin)))
 	mux.HandleFunc("POST /api/posts", middleware.CorsMiddleware(middleware.AuthMiddleware(handlers.CreatePost)))
 	mux.HandleFunc("GET /api/posts", middleware.CorsMiddleware(handlers.GetPosts))
 	mux.HandleFunc("GET /api/posts/{id}", middleware.CorsMiddleware(handlers.GetPostById))

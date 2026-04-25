@@ -26,3 +26,32 @@ func Connect(connStr string) error {
 
 	return nil
 }
+
+func InitializeSchema() error {
+	const userSchema = `
+    CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY,
+        username VARCHAR UNIQUE,
+        password VARCHAR 
+		email VARCHAR
+		verified BOOL
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );`
+
+	const tokenSchema = `
+    CREATE TABLE IF NOT EXISTS tokens (
+        user_id UUID REFERENCES users(id),
+        token VARCHAR NOT NULL UNIQUE,
+		expires_at TIMESTAMPTZ NOT NULL
+    );`
+
+	_, err := DB.Exec(userSchema)
+	if err != nil {
+		return err
+	}
+	_, err = DB.Exec(tokenSchema)
+	if err != nil {
+		return err
+	}
+	return nil
+}
